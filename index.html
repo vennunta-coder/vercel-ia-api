@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <title>IMAGINATION — Hub (IA + Spotify)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { height:100%; margin:0; background:#111; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { display:block; position:fixed; inset:0; z-index:0; }
+    #wrap { position:relative; z-index:10; min-height:100%; display:grid; place-items:center; padding:24px; }
+    .card { width:min(980px, 96vw); background:rgba(255,255,255,.06); border-radius:18px; padding:18px; box-shadow:0 12px 40px rgba(0,0,0,.45); backdrop-filter: blur(8px); }
+    header { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 8px 12px; }
+    h1 { margin:0; font-size:18px; color:#fff; letter-spacing:.3px; }
+    .brand { display:flex; align-items:center; gap:10px; }
+    .brand .dot { width:10px; height:10px; border-radius:50%; background:#e9e9e9; box-shadow:0 0 12px rgba(255,255,255,.6); }
+    .tabs { display:flex; gap:6px; }
+    .tab-btn { cursor:pointer; border:0; border-radius:12px; padding:10px 14px; background:#e9e9e9; color:#111; font-weight:700; }
+    .tab-btn[aria-selected="true"] { background:#111; color:#e9e9e9; outline:1px solid rgba(255,255,255,.2); }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .spotify-embed { width:100%; height: 552px; border-radius:12px; overflow:hidden; }
+    @media (max-width:600px){ .spotify-embed { height:420px; } }
+    #hint { margin-top:8px; font-size:12px; color:#ddd; opacity:.9; }
+    .row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+    .kicker { font-size:12px; opacity:.9; color:#ddd; }
+    .badge { background:rgba(255,255,255,.12); color:#fff; padding:2px 8px; border-radius:999px; font-size:11px; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="wrap">
+    <div class="card">
+      <header>
+        <div class="brand">
+          <div class="dot"></div>
+          <h1>IMAGINATION — Hub</h1>
+        </div>
+        
+        <div class="tabs" role="tablist">
+          <button class="tab-btn" role="tab" id="tab-ia" aria-selected="true" aria-controls="panel-ia">IA</button>
+          <button class="tab-btn" role="tab" id="tab-spotify" aria-selected="false" aria-controls="panel-spotify">Spotify</button>
+        </div>
+    
+      </header>
+
+      <!-- IA Panel -->
+      <section id="panel-ia" class="panel active" role="tabpanel" aria-labelledby="tab-ia">
+        <div class="row">
+          <div class="kicker">Geração automática com IA <span class="badge">tecla P toca/pausa</span> <span class="badge">visualização reativa</span></div>
+        </div>
+        <div id="hint">A carregar a faixa…</div>
+      </section>
+
+      
+      <!-- Spotify Panel -->
+      <section id="panel-spotify" class="panel" role="tabpanel" aria-labelledby="tab-spotify">
+        <div class="row">
+          <div class="kicker">Playlist incorporada (embed oficial). <span class="badge">Nota:</span> visualização reativa só funciona com o player Premium (SDK). No embed, o navegador bloqueia análise de áudio.</div>
+        </div>
+        <div class="spotify-embed" aria-label="Spotify embed">
+          <iframe style="border:0; width:100%; height:100%;"
+            src="https://open.spotify.com/embed/playlist/37i9dQZF1DX3FNkD0kDpDV"
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+            loading="lazy"></iframe>
+        </div>
+      </section>
+    
+    </div>
+  </div>
+
+  <script>
+  // ---- Tabs
+  const tabIA = document.getElementById('tab-ia');
+  const tabSp = document.getElementById('tab-spotify');
+  const panelIA = document.getElementById('panel-ia');
+  const panelSp = document.getElementById('panel-spotify');
+  function select(tab) {
+    if (tab === 'ia') {
+      tabIA?.setAttribute('aria-selected','true'); tabSp?.setAttribute('aria-selected','false');
+      panelIA?.classList.add('active'); panelSp?.classList.remove('active');
+    } else {
+      tabIA?.setAttribute('aria-selected','false'); tabSp?.setAttribute('aria-selected','true');
+      panelSp?.classList.add('active'); panelIA?.classList.remove('active');
+    }
+  }
+  tabIA && (tabIA.onclick = () => select('ia'));
+  tabSp && (tabSp.onclick = () => select('sp'));
+
+  // ---- Canvas particles
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  function resize() {
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    canvas.width = innerWidth * dpr;
+    canvas.height = innerHeight * dpr;
+    canvas.style.width = innerWidth + 'px';
+    canvas.style.height = innerHeight + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    init();
+  }
+  window.addEventListener('resize', resize);
+  const mouse = { x: -9999, y: -9999, radius: 90 };
+  window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  window.addEventListener('mouseleave', () => { mouse.x = -9999; mouse.y = -9999; });
+  let particles = [];
+  const WORD = 'IMAGINATION';
+  const GAP = 4, SIZE = 2, RETURN_SPEED = 20;
+  let SCATTER = 2.6;
+  class Particle {
+    constructor(x,y,c='white') { this.baseX=x; this.baseY=y; this.x=x; this.y=y; this.vx=0; this.vy=0; this.size=SIZE; this.color=c; this.density=Math.random()*40+10; }
+    draw() { ctx.fillStyle=this.color; ctx.fillRect(this.x,this.y,this.size,this.size); }
+    update(soundPush=0) {
+      const dx = mouse.x - this.x, dy = mouse.y - this.y, dist = Math.hypot(dx, dy);
+      if (dist < mouse.radius) {
+        const f = (mouse.radius - dist) / mouse.radius, dirX = dx / (dist || 1), dirY = dy / (dist || 1);
+        this.x -= dirX * f * this.density; this.y -= dirY * f * this.density;
+        this.vx -= dirX * SCATTER * Math.random(); this.vy -= dirY * SCATTER * Math.random();
+      } else {
+        if (this.x !== this.baseX) this.x -= (this.x - this.baseX) / RETURN_SPEED;
+        if (this.y !== this.baseY) this.y -= (this.y - this.baseY) / RETURN_SPEED;
+      }
+      // Empurrão do som (pequeno jitter + leve expansão radial em direção ao centro)
+      const cx = innerWidth/2, cy = innerHeight/2;
+      const dirx = (this.x - cx); const diry = (this.y - cy);
+      const len = Math.hypot(dirx, diry) || 1;
+      this.x += (dirx/len) * soundPush * (0.8 + Math.random()*0.4);
+      this.y += (diry/len) * soundPush * (0.8 + Math.random()*0.4);
+      this.x += (Math.random() - 0.5) * soundPush * 0.8;
+      this.y += (Math.random() - 0.5) * soundPush * 0.8;
+
+      this.x += this.vx; this.y += this.vy; this.vx *= 0.92; this.vy *= 0.92;
+    }
+  }
+  function init() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.save(); ctx.font = 'bold 120px Arial Black'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const midX = innerWidth / 2;
+    ctx.fillStyle = '#111'; ctx.fillRect(0,0,midX,innerHeight);
+    ctx.fillStyle = '#e9e9e9'; ctx.fillRect(midX,0,innerWidth-midX,innerHeight);
+    ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 6;
+    ctx.fillText(WORD, innerWidth/2, innerHeight/2); ctx.restore();
+    const img = ctx.getImageData(0, 0, innerWidth, innerHeight).data;
+    particles = [];
+    for (let y=0; y<innerHeight; y+=GAP) {
+      for (let x=0; x<innerWidth; x+=GAP) {
+        const i = (y*innerWidth + x) * 4, a = img[i + 3];
+        if (a > 128) particles.push(new Particle(x,y));
+      }
+    }
+  }
+  let soundIntensity = 0; // 0..1
+  function animate() {
+    ctx.clearRect(0,0,innerWidth,innerHeight);
+    const grad = ctx.createLinearGradient(innerWidth*0.55,0,innerWidth,0);
+    grad.addColorStop(0,'rgba(255,255,255,0)'); grad.addColorStop(1,'rgba(255,255,255,0.08)');
+    ctx.fillStyle = grad; ctx.fillRect(innerWidth*0.55,0,innerWidth*0.45,innerHeight);
+
+    // push derivado do som (escala aprox. pixels por frame)
+    const push = soundIntensity * 3.0;
+    for (let p of particles) { p.update(push); p.draw(); }
+    requestAnimationFrame(animate);
+  }
+  resize(); animate();
+
+  // ---- IA: load API_BASE from config.json and autogen
+  let API_BASE = "";
+  const hint = document.getElementById('hint');
+  const audio = new Audio();
+  let audioCtx, analyser, dataArray, bufferLength, mediaSrc, lowpass;
+  fetch("config.json").then(r => r.json()).then(cfg => {
+    API_BASE = (cfg.API_BASE || "").replace(/\/$/, "");
+    if (!API_BASE) throw new Error("API_BASE vazio em config.json");
+    autogen();
+  }).catch(err => { hint.textContent = "Configuração ausente: edite config.json"; console.error(err); });
+
+  function setupAudioGraph() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256; // ajuste de resolução
+    bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+
+    mediaSrc = audioCtx.createMediaElementSource(audio);
+
+    // leve filtro + ganho opcional
+    lowpass = audioCtx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 8000; // corta ultra-agudos para dar estabilidade
+
+    mediaSrc.connect(lowpass);
+    lowpass.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    // garantir resume em interações
+    const resume = () => audioCtx.state === 'suspended' && audioCtx.resume();
+    window.addEventListener('click', resume);
+    window.addEventListener('keydown', resume);
+  }
+
+  async function autogen() {
+    try {
+      const r = await fetch(API_BASE + "/api/autogen");
+      const ct = r.headers.get('Content-Type') || '';
+      let url;
+      if (ct.includes('application/json')) {
+        const data = await r.json();
+        url = data.url;
+      } else {
+        const blob = await r.blob();
+        url = URL.createObjectURL(blob);
+      }
+      audio.src = url;
+      setupAudioGraph();
+      hint.textContent = "Pronto — pressione P para tocar/pausar";
+    } catch (e) {
+      hint.textContent = "Erro na autogeração";
+      console.error(e);
+    }
+  }
+
+  // Recompute intensity each frame
+  function updateSoundIntensity() {
+    if (analyser) {
+      analyser.getByteFrequencyData(dataArray);
+      // média global + foco em graves (dão a 'batida')
+      let sum = 0, bass = 0, bassBins = Math.max(4, Math.floor(bufferLength * 0.15));
+      for (let i=0;i<bufferLength;i++) sum += dataArray[i];
+      for (let i=0;i<bassBins;i++) bass += dataArray[i];
+      const avg = sum / bufferLength;
+      const bassAvg = bass / bassBins;
+      // normalização: 0..1
+      const level = avg / 255;
+      const bassLevel = bassAvg / 255;
+      // mistura grave + nível geral, com easing
+      const target = Math.min(1, bassLevel*0.8 + level*0.3);
+      soundIntensity += (target - soundIntensity) * 0.15;
+      // variar SCATTER levemente com o som
+      SCATTER = 2.2 + soundIntensity * 2.0;
+    }
+    requestAnimationFrame(updateSoundIntensity);
+  }
+  updateSoundIntensity();
+
+  // Tocar/pausar com P (e iniciar contexto)
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'p') {
+      setupAudioGraph();
+      if (!audio.src) return;
+      if (audio.paused) audio.play().catch(()=>{});
+      else audio.pause();
+    }
+  });
+  </script>
+</body>
+</html>
